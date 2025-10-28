@@ -1,0 +1,373 @@
+---
+title: "bios611_cluster_WZ"
+output: html_document
+date: "2025-10-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r}
+library(cluster)
+library(ggplot2) 
+library(tidyverse)
+# install.packages("plotly")
+library(plotly)
+```
+
+# Task 1
+
+## Function to generate simulated data
+```{r}
+generate_hypercube_clusters <- function(n, k, side_length, noise_sd = 1.0) {
+    if (n < 2) stop("n should be greater than or equal to 2")
+
+    # the n cluster centers are the positive corners (L, 0, ..., 0), (0, L, ..., 0),...
+    centers <- diag(n) * side_length
+
+    data_list <- list()
+
+    for (i in 1:n) {
+      
+        center <- centers[i, ]
+        noise <- matrix(rnorm(n * k, mean = 0, sd = noise_sd),
+                        nrow = k,
+                        ncol = n)
+
+        cluster_data <- sweep(noise, 2, center, FUN = "+")
+        
+        data_list[[i]] <- as.data.frame(cluster_data)
+        data_list[[i]]$true_cluster <- as.factor(i)
+    }
+    
+    data <- bind_rows(data_list)
+    return(data)
+}
+```
+
+## Simulation
+```{r}
+# set up simulation parameters
+n_dims <- c(6, 5, 4, 3, 2)
+side_lengths <- seq(10, 1, by = -1)
+k_points <- 100
+noise_sd <- 1.0
+
+# k-means and gap statistic parameters
+n_start <- 20    # number of random initializations 
+iter_max <- 50   # maximum number of iterations
+b_ref <- 50      # number of reference datasets for clusGap 
+
+results_df <- data.frame(
+    dimension = integer(),
+    side_length = numeric(),
+    k_estimated = integer()
+)
+
+
+for (n in n_dims) {
+    for (L in side_lengths) {
+
+        data_coords <- generate_hypercube_clusters(
+            n = n,
+            k = k_points,
+            side_length = L,
+            noise_sd = noise_sd
+        ) %>%
+        select(-true_cluster)
+
+        # K.max is set to the true number of clusters (n)
+        gap_stat <- clusGap(
+            x = data_coords,
+#           FUNcluster = kmeans,
+            FUNcluster = function(x, k) {
+                kmeans(x, centers = k, nstart = n_start, iter.max = iter_max)
+            },
+            K.max = n,
+            B = b_ref
+#           FUNargs = list(nstart = n_start, iter.max = iter_max)
+        )
+
+        k_estimated <- 1
+        for (k in 1:(n - 1)) {
+             gap_k <- gap_stat$Tab[k, "gap"]
+             gap_k_plus_1 <- gap_stat$Tab[k+1, "gap"]
+             se_k_plus_1 <- gap_stat$Tab[k+1, "SE.sim"]
+
+             if (gap_k >= gap_k_plus_1 - se_k_plus_1) {
+                 k_estimated <- k
+                 break 
+             }
+         }
+
+        new_row <- data.frame(
+            dimension = n,
+            side_length = L,
+            k_estimated = k_estimated
+        )
+        results_df <- bind_rows(results_df, new_row)
+    }
+}
+
+```
+
+## Visualization
+```{r}
+results_df$dimension_f <- factor(results_df$dimension)
+
+true_k_ref <- data.frame(
+    dimension = n_dims,
+    true_k = n_dims
+)
+true_k_ref$dimension_f <- factor(true_k_ref$dimension)
+
+p <- ggplot(results_df, aes(x = side_length, y = k_estimated, color = dimension_f)) +
+
+    geom_point(size = 3) +
+    geom_line(linewidth = 1) +
+    geom_hline(aes(yintercept = dimension, color = dimension_f),
+               data = true_k_ref,
+               linetype = "dashed",
+               alpha = 0.6) +
+
+    facet_wrap(~ dimension_f, ncol = 1, strip.position = "right") +
+    scale_x_continuous(breaks = side_lengths) +
+    scale_y_continuous(breaks = seq(0, max(n_dims), by = 1)) +
+    labs(
+        title = "Gap Statistic Estimated Number of Clusters vs. Cluster Separation (Side Length)",
+        subtitle = paste("Parameters: k=100 points/cluster, noise_sd=1.0, kmeans nstart=20, iter.max=50. \nReference line shows True K (n)."),
+        x = "Side Length (L) of Hypercube Centers",
+        y = "Estimated Number of Clusters (K̂)",
+        color = "True K (n / Dimension)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "none",
+        plot.title = element_text(face = "bold"),
+        strip.text.y = element_text(angle = 0, face = "bold"),
+        panel.grid.major.x = element_line(linetype = "dotted", color = "gray")
+    )
+
+p
+
+ggsave("gap_statistic_simulation_plot.png", plot = p, width = 10, height = 12)
+
+```
+
+
+# Task 2
+
+## Generate data function
+```{r}
+generate_shell_clusters <- function(n_shells, k_per_shell, max_radius, noise_sd = 0.1) {
+    if (n_shells < 2) stop("n_shells must be 2 or greater.")
+
+    # radii are evenly spaced between a small inner radius (max_radius/n_shells) and max_radius
+    radii <- seq(max_radius / n_shells, max_radius, length.out = n_shells)
+
+    data_list <- list()
+
+    for (i in 1:n_shells) {
+        R_mean <- radii[i]
+        
+        unit_points <- matrix(rnorm(3 * k_per_shell), ncol = 3)
+        norms <- sqrt(rowSums(unit_points^2))
+        unit_points <- unit_points / norms
+        
+        # add radial noise and scale
+        radial_scaling <- rnorm(k_per_shell, mean = R_mean, sd = noise_sd)
+        shell_data <- unit_points * radial_scaling
+        
+        data_list[[i]] <- as.data.frame(shell_data)
+        colnames(data_list[[i]]) <- c("X1", "X2", "X3")
+        data_list[[i]]$true_cluster <- as.factor(i)
+    }
+
+    data <- bind_rows(data_list)
+    return(data)
+}
+```
+
+## Spectral clustering wrapper function
+```{r}
+spectral_clustering_wrapper <- function(x, k, d_threshold = 1.0) {
+    
+    N <- nrow(x)
+    
+    # compute matrix A
+    D_euc <- as.matrix(dist(x, method = "euclidean"))
+    A <- ifelse(D_euc < d_threshold, 1, 0)
+    diag(A) <- 0
+
+    if (k == 1) {
+        return(list(cluster = rep(1, N), withinss = sum(apply(x, 2, var)) * (N - 1)))
+    }
+    
+    # compute degree matrix D
+    D_vec <- rowSums(A)
+    isolated_points <- which(D_vec == 0)
+    if (length(isolated_points) > 0) {
+        D_inv_sqrt_vec <- 1 / sqrt(D_vec)
+        D_inv_sqrt_vec[isolated_points] <- 0
+    } else {
+        D_inv_sqrt_vec <- 1 / sqrt(D_vec)
+    }
+    
+    # compute normalized Laplacian (L_sym = D^-1/2 * (D - A) * D^-1/2)
+    D_inv_sqrt <- diag(D_inv_sqrt_vec)
+    I_mat <- diag(N)
+    # symmetric normalized Laplacian, L_sym = I - D^-1/2 * A * D^-1/2 
+    L_sym <- I_mat - D_inv_sqrt %*% A %*% D_inv_sqrt
+    
+    L_sym <- (L_sym + t(L_sym)) / 2
+
+    # eigen-decomposition
+    eigens <- eigen(L_sym, symmetric = TRUE)
+    sorted_indices <- order(eigens$values)
+    
+    # k selected eigenvectors
+    V <- eigens$vectors[, head(sorted_indices, k)]
+
+    # normalize eigenvectors (each row has unit length)
+    V_row_norms <- sqrt(rowSums(V^2))
+    V_row_norms[V_row_norms == 0] <- 1
+    V_normalized <- V / V_row_norms
+    
+    # cluster the eigenvectors using k-means
+    kmeans_result <- kmeans(V_normalized, 
+                            centers = k, 
+                            nstart = 20, 
+                            iter.max = 50)
+
+    return(list(cluster = kmeans_result$cluster, 
+                withinss = kmeans_result$withinss))
+}
+```
+
+
+## Interactive 3D Plot 
+```{r}
+# generate sample data
+sample_data <- generate_shell_clusters(4, 100, 10, 0.1)
+
+p_3d <- plot_ly(sample_data, 
+              x = ~X1, 
+              y = ~X2, 
+              z = ~X3, 
+              color = ~true_cluster, 
+              type = 'scatter3d', 
+              mode = 'markers',
+              marker = list(size = 3)) %>%
+    layout(
+        title = "3D Visualization of Concentric Shells (R_max=10)",
+        scene = list(
+            xaxis = list(title = 'X'),
+            yaxis = list(title = 'Y'),
+            zaxis = list(title = 'Z')
+        )
+    )
+
+htmlwidgets::saveWidget(p_3d, "shells_3d_plot.html")
+```
+
+## Simulation
+```{r}
+# simulation parameters
+n_shells <- 4
+k_per_shell <- 100
+noise_sd <- 0.1
+D_threshold <- 1.0 
+max_radii <- seq(10, 0, by = -1)
+B_ref <- 50 
+
+results_df_spec <- data.frame(
+    max_radius = numeric(),
+    k_estimated = integer()
+)
+
+for (r_max in max_radii) {
+    if (r_max < 1) {
+      
+        cat("Skipping very small max_radius where clusters would fully overlap.\n")
+        results_df_spec <- bind_rows(results_df_spec, data.frame(max_radius = r_max, k_estimated = 1))
+        next
+    }
+    
+    data_coords <- generate_shell_clusters(
+        n_shells = n_shells,
+        k_per_shell = k_per_shell,
+        max_radius = r_max,
+        noise_sd = noise_sd
+    ) %>%
+    select(-true_cluster)
+
+    gap_stat_spec <- clusGap(
+        x = data_coords,
+        FUNcluster = function(x, k) {
+            spectral_clustering_wrapper(x, k, d_threshold = D_threshold)
+        },
+        K.max = n_shells,
+        B = B_ref
+    )
+
+    k_estimated <- 1
+    for (k_check in 1:(n_shells - 1)) {
+         gap_k <- gap_stat_spec$Tab[k_check, "gap"]
+         gap_k_plus_1 <- gap_stat_spec$Tab[k_check + 1, "gap"]
+         se_k_plus_1 <- gap_stat_spec$Tab[k_check + 1, "SE.sim"]
+
+         if (gap_k >= gap_k_plus_1 - se_k_plus_1) {
+             k_estimated <- k_check
+             break # Found the best k
+         }
+     }
+
+    new_row <- data.frame(
+        max_radius = r_max,
+        k_estimated = k_estimated
+    )
+    results_df_spec <- bind_rows(results_df_spec, new_row)
+}
+```
+
+
+## Visualization
+```{r}
+p_spec <- ggplot(results_df_spec, aes(x = max_radius, y = k_estimated)) +
+    geom_point(size = 3, color = "blue") +
+    geom_line(linewidth = 1, color = "blue") +
+    geom_hline(yintercept = n_shells, 
+               linetype = "dashed", 
+               color = "red", 
+               alpha = 0.8) +
+    scale_x_continuous(breaks = max_radii) +
+    scale_y_continuous(breaks = seq(0, n_shells, by = 1)) +
+    labs(
+        title = "Spectral Clustering Estimated K vs. Shell Separation (Max Radius)",
+        subtitle = paste("True K=4. Parameters: d_threshold =", D_threshold, ", noise_sd =", noise_sd),
+        x = "Maximum Radius (R_max, controlling shell separation)",
+        y = "Estimated Number of Clusters (K̂)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        plot.title = element_text(face = "bold"),
+        panel.grid.major.x = element_line(linetype = "dotted", color = "gray")
+    )
+
+p_spec
+
+ggsave("spectral_simulation_plot.png", plot = p_spec, width = 10, height = 6)
+
+```
+
+
+## Interpretation
+
+The plot show that for all $R_{\text{max}}$ values from 9 down to 0, the algorithm estimates that the number of clusters is 1. A larger threshold allows connections across wider gaps. This makes the algorithm less robust.This will cause the failure point to move up, maybe greater than 10.
+
+
+
+
