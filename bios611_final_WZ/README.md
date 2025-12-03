@@ -22,12 +22,12 @@ This entire project is designed to run within a Docker container.
 
 1.  Clone the Repository:
     ```bash
-    git clone [Your Git Repository URL]
-    cd [Your Repository Name]
+    git clone https://github.com/aZhunnn/BIOS611.git
+    cd BIOS611/bios611_final
     ```
 
 2.  Build the Docker Image:
-    Build the image using your student name as the tag:
+    Navigate into the project directory that contains the Dockerfile and build the container. 
     ```bash
     docker build . -t bios611_final
     ```
@@ -35,9 +35,9 @@ This entire project is designed to run within a Docker container.
 3.  Run the Container:
     Run the container, exposing the RStudio port (8787) and mounting the project directory for access:
     ```bash
-    docker run -e PASSWORD=yourpassword -p 8787:8787 -v $(pwd):/home/rstudio/project bios611_final
+    docker run -e PASSWORD=password -p 8787:8787 -v $(pwd):/home/rstudio/project bios611_final
     ```
-    * *Note: Access RStudio in your browser at `http://localhost:8787` using `rstudio` as the username and `yourpassword` (or whatever you set) as the password.*
+    * *Note: Access RStudio in your browser at `http://localhost:8787` using `rstudio` as the username and `password` as the password.*
 
 ## Generating the Report
 
