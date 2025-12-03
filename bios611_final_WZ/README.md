@@ -65,5 +65,4 @@ source and placed in the project structure for the container to access it.
 1.  **Source:** [Kaggle: Global Coffee Health Dataset]
 (https://www.kaggle.com/datasets/uom190346a/global-coffee-health-dataset/data)
 2.  **Required File:** `coffee_health.csv`
-3.  **Location:** Create a directory named `data` in the project root and 
-place the CSV file inside it: `./data/coffee_health.csv`
+3.  **Location:** The data is just in the directory: `./coffee_health.csv`
