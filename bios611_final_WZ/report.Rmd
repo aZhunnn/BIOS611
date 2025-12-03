@@ -1,0 +1,478 @@
+---
+title: "Global Coffee & Health Analysis"
+output: html_document
+date: "2025-11-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+
+```{r}
+library(tidyverse)
+# install.packages("janitor")
+library(janitor)
+library(knitr)
+# install.packages("table1")
+library(table1)
+library(ggplot2)
+# install.packages("reshape2")
+library(reshape2)
+library(cluster)
+
+```
+
+
+# Background
+
+This project analyzes the **Global Coffee Health Dataset** (10,000 synthetic records across 20 countries) from kaggle.com (https://www.kaggle.com/datasets/uom190346a/global-coffee-health-dataset/data) to explore the correlations between coffee consumption and various health outcomes. Through descriptive statistics, correlation modeling, and lifestyle-based clustering, the study identifies moderate negative associations between coffee intake and sleep duration and quality, and strong links between stress, sleep disruption, and self-reported health issues. While clustering highlights distinct lifestyle archetypes — including a high-coffee/low-sleep subgroup — the weak silhouette scores indicate overlapping patterns across individuals. Overall, the study characterizes realistic behavioral relationships among coffee consumption, sleep, and health, and provides a foundation for future longitudinal investigations. 
+
+
+
+
+# Descriptive statistics and EDA
+
+```{r}
+# read the coffee
+coffee <- read.csv("coffee_health.csv",header = T)
+
+# clean column names
+coffee <- coffee %>%
+  clean_names()
+
+# table 1
+table1(~.,data = coffee[,-1])
+
+```
+
+The dataset contains 10,000 records evenly distributed across different countries. The average daily coffee consumption is 2.5 cups, with a range of 0 to 5 cups. The sample population is generally healthy, with an average BMI of 24.0 and an average heart rate of 70.6 bpm. Most participants report Good sleep quality (56.4%) and Low stress levels (69.9%). Lifestyle risk factors are noted, with 20% of the sample identifying as smokers and 30.1% consuming alcohol.
+
+This table suggests that the population represents a generally healthy and diverse cohort, not skewed toward any demographic. Coffee consumption appears habitual rather than excessive at the population level. Sleep quality and health outcomes appear favorable on average, offering useful contrast for correlation analysis with coffee intake.
+
+
+## Correlation heatmap
+
+```{r}
+sleep_map <- c("Poor" = 1, "Fair" = 2, "Good" = 3, "Excellent" = 4)
+coffee <- coffee %>%
+  mutate(sleep_quality_encoded = recode(sleep_quality, !!!sleep_map))
+
+# Stress_Level (Low=1 to High=3)
+stress_map <- c("Low" = 1, "Medium" = 2, "High" = 3)
+coffee <- coffee %>%
+  mutate(stress_level_encoded = recode(stress_level, !!!stress_map))
+
+# Health_Issues (None=0 to Severe=2)
+health_map <- c("None" = 0, "Mild" = 1, "Moderate" = 2,"Severe" = 3)
+coffee <- coffee %>%
+  mutate(health_issues_encoded = recode(health_issues, !!!health_map))
+
+# Select variables for correlation matrix (excluding ID, Country, Gender, Occupation, and original categories)
+cols_to_correlate <- c(
+    'age', 'coffee_intake', 'caffeine_mg', 'sleep_hours',
+    'sleep_quality_encoded', 'bmi', 'heart_rate', 'stress_level_encoded',
+    'physical_activity_hours', 'smoking', 'alcohol_consumption', 'health_issues_encoded'
+)
+
+# Calculate correlation matrix
+correlation_matrix <- cor(coffee[, cols_to_correlate])
+
+melted_cor <- melt(correlation_matrix)
+
+# Plot the heatmap
+plot_cor <- ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name = "Pearson\nCorrelation") +
+  theme_minimal() +
+  coord_fixed() +
+  geom_text(aes(label = format(value, digits = 2)), size = 2.5) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Correlation Matrix of Health and Consumption Variables",
+    x = "",
+    y = ""
+  )
+plot_cor
+# save plot
+ggsave("correlation_heatmap_R.png", plot_cor, width = 10, height = 8)
+```
+
+**Strong positive correlation: **stress level v.s. health issue, sleep quality v.s. sleep hours, coffee intake v.s. caffeine intake.
+
+**Moderate positive correlation: **health issue v.s. coffee intake, health issue v.s. caffeine intake, stress level v.s. coffee intake, stress level v.s. caffeine intake
+
+**Strong negative correlation: **health issue v.s. sleep hours, health issue v.s. sleep quality, stress level v.s. sleep hours, stress level v.s. sleep quality.
+
+**Moderate negative correlation: **sleep hours v.s. coffee intake, sleep hours v.s. caffeine intake, sleep quality v.s. coffee intake, sleep quality v.s. caffeine intake.
+
+**Conclusions: **
+
+- Poor sleep appears strongly associated with both stress and health issues, suggesting interacting behavioral and health mechanisms.
+- Greater coffee intake is moderately linked to reduced sleep quantity and quality, but not to BMI or heart rate in this dataset.
+- The dataset supports the hypothesis that lifestyle factors (coffee + stress) may be intertwined with sleep and health.
+
+
+## EDA
+```{r}
+# 4. EDA Visualizations
+
+# EDA 1: Distribution of Coffee Intake
+plot1 <- coffee %>%
+  ggplot(aes(x = coffee_intake)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of Daily Coffee Intake (Cups)",
+    x = "Coffee Intake (Cups)",
+    y = "Frequency"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(coffee$coffee_intake), by = 1))
+
+# EDA 2: Caffeine vs. Sleep Hours
+plot2 <- coffee %>%
+  ggplot(aes(x = caffeine_mg, y = sleep_hours)) +
+  geom_point(alpha = 0.3, color = "darkgreen") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    title = "Caffeine Intake vs. Sleep Duration",
+    x = "Caffeine Intake (mg)",
+    y = "Sleep Duration (Hours)"
+  ) +
+  theme_minimal()
+
+plot2
+
+
+# EDA 3: Sleep Quality across Stress Levels
+plot3 <- coffee %>%
+  mutate(sleep_quality = factor(sleep_quality, levels = c("Poor", "Fair", "Good", "Excellent"))) %>%
+  ggplot(aes(x = stress_level, fill = sleep_quality)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Proportion of Sleep Quality by Stress Level",
+    x = "Stress Level",
+    y = "Proportion",
+    fill = "Sleep Quality"
+  ) +
+  theme_minimal()
+
+# Save plots
+ggsave("coffee_intake_distribution.png", plot1, width = 6, height = 4)
+ggsave("caffeine_vs_sleep.png", plot2, width = 6, height = 4)
+ggsave("sleep_quality_by_stress.png", plot3, width = 6, height = 4)
+
+```
+
+The scatter plot shows a slight negative trend (red regression line) across a highly dense and widely spread set of data points. The majority of data points are clustered below 400 mg of caffeine and between 6 and 8 hours of sleep.
+
+This plot confirms the moderate negative correlation from the heatmap: as caffeine intake increases, sleep duration tends to decrease. While the relationship is statistically significant, the effect size is not extremely large, suggesting that while caffeine reduces sleep time, the total reduction for most individuals is modest.
+
+
+# Clustering
+
+**Data Preparation**
+
+1. Data Cleaning and Selection
+
+The initial steps focus on gathering and preparing the specific information needed for analysis:
+
+- Loading and Formatting: A dataset containing information about coffee and health is loaded from a file. The names of the data columns are immediately cleaned and standardized (e.g., ensuring they are all lowercase and easy to read).
+
+- Feature Identification: A list is created to specify the seven numerical features that will be used for grouping the observations. These features include metrics like coffee consumption, body mass index, sleep duration, heart rate, physical activity, age, and caffeine intake.
+
+2. Standardizing the Data
+
+To ensure fairness in the clustering process, the numerical features are adjusted:
+
+- Scaling: The entire data set of selected features is standardized. The values are transformed so they have a mean of zero and a standard deviation of one. This prevents features with naturally larger ranges (like 'age' or 'caffeine intake') from having a disproportionately large impact on the distance calculations compared to features with smaller ranges (like 'sleep hours'). This standardized data is the final input used by the K-Means algorithm.
+
+3. Finding the Optimal Number of Groups (k)
+
+Before running the final grouping model, the process determines the most appropriate number of groups, known as $k$, to use. This is done by testing a range of possibilities, from 2 groups up to 10 groups.
+
+- Elbow Method: For each potential number of groups ($k$), the K-Means algorithm is run. The Total Within Sum of Squares is calculated, which measures how compact the groups are. A lower value means tighter, more homogeneous groups.This metric is tracked for all $k$ values. When plotted, the point where the rate of decrease in this value slows sharply (the "elbow") suggests the best $k$.
+
+- Silhouette Method: For each potential number of groups ($k$ greater than 1), the average silhouette score is calculated. This score measures how similar an object is to its own group compared to other groups. Scores closer to 1 indicate well-separated and distinct groups.The $k$ value that produces the highest average score is considered the best choice.
+
+- Final Selection: After evaluating both methods, the analysis explicitly selects 4 as the final, optimal number of groups ($k$) to use in the subsequent K-Means model.
+
+```{r}
+library(cluster)
+
+coffee <- read.csv("coffee_health.csv", header = TRUE) %>%
+  clean_names()
+
+clustering_features <- c(
+  'coffee_intake', 'bmi', 'sleep_hours', 'heart_rate', 
+  'physical_activity_hours', 'age', 'caffeine_mg'
+)
+
+X_cluster <- coffee %>% 
+  select(all_of(clustering_features))
+
+# Standardize features (mean=0, sd=1)
+X_cluster_scaled <- scale(X_cluster)
+
+# --- 2. Determine Optimal Number of Clusters (k) ---
+
+k_range <- 2:10
+
+inertias <- suppressWarnings(
+  map_dbl(k_range, function(k) {
+    kmeans(X_cluster_scaled, centers = k, nstart = 25, iter.max = 30)$tot.withinss
+  })
+)
+
+silhouette_scores <- suppressWarnings(
+  map_dbl(k_range, function(k) {
+    km_model <- kmeans(X_cluster_scaled, centers = k, nstart = 25, iter.max = 30)
+    # Calculate average silhouette width
+    if (k > 1) {
+      return(silhouette(km_model$cluster, dist(X_cluster_scaled))[, "sil_width"] %>% mean)
+    } else {
+      return(NA)
+    }
+  })
+)
+
+# Set the optimal k 
+optimal_k <- 4
+```
+
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+library(cluster)
+library(ggplot2)
+library(stats)
+# library(factoextra)
+
+# --- 1. Load Data ---
+# load("clustering_prep.RData")
+
+# --- 2. Final K-Means Model ---
+set.seed(537) 
+
+kmeans_final <- suppressWarnings(
+  kmeans(X_cluster_scaled, centers = optimal_k, nstart = 25, iter.max = 30)
+)
+coffee$Cluster <- kmeans_final$cluster
+final_sil_score <- silhouette(kmeans_final$cluster, dist(X_cluster_scaled))[, "sil_width"] %>% mean
+
+# --- 3. Analyze Clusters ---
+
+cluster_analysis <- coffee %>%
+  group_by(Cluster) %>%
+  summarise(
+    n = n(),
+    percentage = n()/nrow(coffee) * 100,
+    across(all_of(clustering_features), mean, .names = "mean_{.col}"),
+    across(all_of(clustering_features), sd, .names = "std_{.col}"), 
+    most_common_country = names(which.max(table(country)))[1],
+    most_common_occupation = names(which.max(table(occupation)))[1],
+    most_common_sleep_quality = names(which.max(table(sleep_quality)))[1],
+    .groups = 'drop'
+  )
+
+# --- 4. Advanced Clustering Visualization
+## 4.1. PCA Visualization 
+# Perform PCA on the scaled data
+pca_result <- prcomp(X_cluster_scaled, center = FALSE, scale. = FALSE) 
+pca_data <- as.data.frame(pca_result$x) %>%
+  select(PC1, PC2) %>%
+  mutate(Cluster = factor(kmeans_final$cluster))
+
+variance_explained <- (pca_result$sdev^2) / sum(pca_result$sdev^2)
+pc1_var <- round(variance_explained[1] * 100, 1)
+pc2_var <- round(variance_explained[2] * 100, 1)
+
+plot_pca <- ggplot(pca_data, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.6) +
+  labs(
+    title = "Clusters in PCA Space (PC1 vs PC2)",
+    x = paste0("PC1 (", pc1_var, "%)"),
+    y = paste0("PC2 (", pc2_var, "%)"),
+    color = "Cluster"
+  ) +
+  theme_minimal()
+
+## 4.2. Elbow Curve Plot 
+elbow_data <- data.frame(k = 1:length(inertias), wss = inertias)
+
+plot_elbow <- ggplot(elbow_data, aes(x = k, y = wss)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue", size = 2) +
+  labs(
+    title = "Elbow Method for Optimal k",
+    x = "Number of Clusters (k)",
+    y = "Total Within Sum of Squares (WSS)"
+  ) +
+  geom_vline(xintercept = optimal_k, linetype = 2, color = "red") +
+  scale_x_continuous(breaks = elbow_data$k) + # Ensure k is treated as discrete steps
+  theme_minimal()
+
+## 4.3. Silhouette Scores Plot 
+silhouette_data <- data.frame(k = 2:(length(silhouette_scores) + 1), avg_sil_width = silhouette_scores)
+
+plot_silhouette <- ggplot(silhouette_data, aes(x = k, y = avg_sil_width)) +
+  geom_line(color = "red") +
+  geom_point(color = "red", size = 2) +
+  labs(
+    title = "Silhouette Score by Number of Clusters",
+    x = "Number of Clusters (k)",
+    y = "Average Silhouette Width"
+  ) +
+  geom_vline(xintercept = optimal_k, linetype = 2, color = "blue") +
+  scale_x_continuous(breaks = silhouette_data$k) +
+  theme_minimal()
+
+## 4.4. Cluster profiles heatmap 
+cluster_profile_data <- cluster_analysis %>% 
+  select(Cluster, starts_with("mean_")) %>%
+  pivot_longer(cols = starts_with("mean_"), names_to = "Feature", values_to = "Mean_Value") %>%
+  group_by(Feature) %>%
+  mutate(Normalized_Value = Mean_Value / max(Mean_Value)) %>% 
+  ungroup() %>%
+  mutate(Feature = gsub("mean_", "", Feature))
+
+plot_heatmap <- ggplot(cluster_profile_data, aes(x = factor(Cluster), y = Feature, fill = Normalized_Value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "#F44336", high = "#2196F3", mid = "#FFFFFF", 
+                       midpoint = 0.5, limit = c(0, 1), name = "Normalized Mean") +
+  geom_text(aes(label = round(Normalized_Value, 2)), color = "black", size = 3) +
+  labs(title = "Cluster Profiles (Normalized)", x = "Cluster") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0))
+
+## 4.5. Scatter Plot (Coffee vs BMI) 
+plot_scatter <- ggplot(coffee, aes(x = coffee_intake, y = bmi, color = factor(Cluster))) +
+  geom_point(alpha = 0.6, size = 3) +
+  labs(title = "Coffee vs BMI by Cluster", 
+       x = "Coffee Intake (cups/day)", 
+       y = "BMI",
+       color = "Cluster") +
+  theme_minimal()
+
+# --- 5. Save plots ---
+ggsave("pca_cluster_visualization.png", plot_pca, width = 8, height = 6)
+ggsave("elbow_method_plot.png", plot_elbow, width = 6, height = 5)
+ggsave("silhouette_plot.png", plot_silhouette, width = 6, height = 5)
+ggsave("cluster_profile_heatmap.png", plot_heatmap, width = 8, height = 6)
+ggsave("coffee_bmi_scatter.png", plot_scatter, width = 7, height = 6)
+```
+
+```{r}
+plot_scatter
+```
+
+
+The scatter plot of BMI versus Coffee Intake shows no visual pattern or distinction between the four clusters. The points for all clusters overlap significantly across the entire range of both variables.
+
+In conclusion, the clustering analysis reinforces the correlation finding: BMI is not a primary factor in segmenting the population based on coffee intake, sleep, heart rate, or physical activity. All four clusters have nearly identical average BMIs (ranging from 23.8 to 24.2).
+
+
+```{r}
+plot_pca
+plot_elbow
+plot_silhouette
+plot_heatmap
+```
+
+
+
+From the result,
+
+- Suggested number of clusters (based on analysis): 4
+- Best silhouette score at k=2: 0.174
+- Silhouette score: 0.118
+- The result indicates weak cluster separation. 
+
+**Cluster 1 (n=2083, 20.8%):**
+
+- Moderate coffee intake and older population (avg. age 47.9)
+- Coffee Intake: 2.96 ± 0.85 cups/day
+- BMI: 23.9 ± 3.8
+- Sleep Hours: 6.5 ± 1.1
+- Heart Rate: 71 ± 10 bpm
+- Physical Activity: 6.6 ± 3.9 hrs/week
+- Average Age: 47.9 years
+- Most common country: China
+- Most common occupation: Student
+- Most common sleep quality: Good
+
+**Cluster 2 (n=2663, 26.6%):**
+
+- Lowest coffee intake (~1.4–1.5 cups/day) and longest sleep (~6.9–7.1 hrs)
+- Coffee Intake: 1.44 ± 0.87 cups/day
+- BMI: 24 ± 3.9
+- Sleep Hours: 6.9 ± 1.2
+- Heart Rate: 70 ± 10 bpm
+- Physical Activity: 11.4 ± 2.2 hrs/week
+- Average Age: 33.8 years
+- Most common country: India
+- Most common occupation: Office
+- Most common sleep quality: Good
+
+**Cluster 3 (n=2463, 24.6%):**
+
+- Lowest coffee intake (~1.4–1.5 cups/day) and longest sleep (~6.9–7.1 hrs)
+- Coffee Intake: 1.49 ± 0.91 cups/day
+- BMI: 24.2 ± 4
+- Sleep Hours: 7.1 ± 1.2
+- Heart Rate: 69 ± 10 bpm
+- Physical Activity: 3.5 ± 2.2 hrs/week
+- Average Age: 31.4 years
+- Most common country: Belgium
+- Most common occupation: Office
+- Most common sleep quality: Good
+
+**Cluster 4 (n=2791, 27.9%):**
+
+- Highest coffee intake (4.09 cups/day) and shortest sleep (6.2 hrs)
+- Coffee Intake: 4.09 ± 0.95 cups/day
+- BMI: 23.8 ± 3.9
+- Sleep Hours: 6.2 ± 1.2
+- Heart Rate: 72 ± 10 bpm
+- Physical Activity: 7.9 ± 4.2 hrs/week
+- Average Age: 29.5 years
+- Most common country: Norway
+- Most common occupation: Other
+- Most common sleep quality: Good
+
+In conclusion,
+
+- Clustering reveals identifiable lifestyle archetypes (e.g., “high-coffee/low sleep” vs. “low-coffee/high activity”), though cluster boundaries are fuzzy.
+- Coffee intake variability meaningfully interacts with sleep patterns and physical activity habits across subgroups.
+- Although the clustering was interpretable, the low silhouette score cautions against overgeneralizing.
+
+
+# Limitations
+- This is a cross-sectional data, which limits causal inference.
+- Self-reported measures may introduce bias.
+
+# Furture investigation
+- Incorporating longitudinal or cohort-based data to examine within-person changes in coffee intake, sleep patterns, and stress over time
+- Incorporating cultural and environmental factors driving coffee consumption patterns.
+- Further investigation of coffee's role in stress management and mental health.
+
+
+
+
+
+
+
+
+
+
+
+
